@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #07090E;
+  --s1: #0C1018;
+  --s2: #111723;
+  --s3: #1A2234;
+  --b1: #1E2A3E;
+  --b2: #2A3A52;
+  --ac: #00E5C3;
+  --ac1: rgba(0,229,195,.07);
+  --ac2: rgba(0,229,195,.16);
+  --g: #34D399;
+  --g1: rgba(52,211,153,.08);
+  --w: #FBBF24;
+  --w1: rgba(251,191,36,.08);
+  --d: #F87171;
+  --d1: rgba(248,113,113,.08);
+  --bl: #60A5FA;
+  --bl1: rgba(96,165,250,.08);
+  --p: #A78BFA;
+  --p1: rgba(167,139,250,.08);
+  --o: #FB923C;
+  --o1: rgba(251,146,60,.08);
+  --t1: #F0F4F8;
+  --t2: #94A3B8;
+  --t3: #5B6B82;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--t1);
+  font-family: 'DM Sans', sans-serif;
+}
+
+.mono { font-family: 'IBM Plex Mono', monospace; }
+
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--b2); border-radius: 4px; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: .4; }
+}
+
+.fade-up { animation: fadeUp .2s ease both; }
+.spin    { animation: spin 1s linear infinite; }
+.pulse   { animation: pulse 2s ease-in-out infinite; }
