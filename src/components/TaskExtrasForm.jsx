@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
@@ -9,8 +9,16 @@ function readFileAsDataURL(file) {
   })
 }
 
-export function TaskExtrasForm({ details, links, images, onPatch, disabled, compact }) {
+export function TaskExtrasForm({ details, links, images, onPatch, disabled, compact, autoFocusDetails, onDetailsFocused }) {
   const dropRef = useRef(null)
+  const detailsRef = useRef(null)
+
+  useEffect(() => {
+    if (!autoFocusDetails || !detailsRef.current) return
+    detailsRef.current.focus()
+    onDetailsFocused?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once when opening edit-with-details
+  }, [autoFocusDetails])
 
   const setDetails = (v) => onPatch({ details: v })
   const setLinks = (next) => onPatch({ links: next })
@@ -87,6 +95,7 @@ export function TaskExtrasForm({ details, links, images, onPatch, disabled, comp
     <div onClick={(e) => e.stopPropagation()}>
       <label style={lab}>DETAILS (notes, context)</label>
       <textarea
+        ref={detailsRef}
         value={details || ''}
         onChange={(e) => setDetails(e.target.value)}
         disabled={disabled}

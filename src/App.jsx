@@ -10,6 +10,30 @@ const AREAS = [
 ]
 const AREA_ICONS = { software:'◈', hardware:'◉', business:'◆', operation:'◎' }
 
+/** Invisible 1×1 pixel drag image so the browser does not show a huge semi-opaque title ghost. */
+let emptyDragImage = null
+function getEmptyDragImage() {
+  if (typeof Image === 'undefined') return null
+  if (!emptyDragImage) {
+    emptyDragImage = new Image()
+    emptyDragImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs='
+  }
+  return emptyDragImage
+}
+
+function DragGripIcon({ color }) {
+  return (
+    <svg width="12" height="16" viewBox="0 0 12 16" aria-hidden style={{ display: 'block', color }}>
+      {[0, 1, 2].map((row) => (
+        <g key={row} transform={`translate(0 ${row * 5.5})`}>
+          <circle cx="3" cy="2.5" r="1.35" fill="currentColor" />
+          <circle cx="9" cy="2.5" r="1.35" fill="currentColor" />
+        </g>
+      ))}
+    </svg>
+  )
+}
+
 function mergeTaskFormPatch(prev, partial) {
   const { _appendImage, _removeImageAt, ...rest } = partial
   let next = { ...prev, ...rest }
@@ -17,6 +41,17 @@ function mergeTaskFormPatch(prev, partial) {
   else if (_removeImageAt != null) {
     next = { ...next, images: (prev.images || []).filter((_, j) => j !== _removeImageAt) }
   }
+  return next
+}
+
+/** Reorder task ids for drag-drop: move item at fromIdx to land before/after toIdx semantics (drop on target). */
+function moveTaskIdInList(ids, fromIdx, toIdx) {
+  if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return [...ids]
+  const next = [...ids]
+  const [x] = next.splice(fromIdx, 1)
+  let ins = toIdx
+  if (fromIdx < toIdx) ins = toIdx - 1
+  next.splice(ins, 0, x)
   return next
 }
 
@@ -47,6 +82,12 @@ const api = {
     fetch('/api/sections', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ area, name, reassignTo }) }).then(async (r) => {
       const d = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(d.error || 'Failed')
+      return d
+    }),
+  tasksReorder: (area, sec, ids) =>
+    fetch('/api/tasks/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ area, sec, ids }) }).then(async (r) => {
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.error || 'Reorder failed')
       return d
     }),
 }
@@ -152,20 +193,27 @@ function Checkbox({checked, onChange}) {
 }
 
 // ─── TASK CARD ────────────────────────────────────────────────────────────────
-function TaskCard({ task, onToggle, onDelete, onEdit, saving, dimmed, subtitleNames }) {
+function TaskCard({ task, onToggle, onDelete, onEdit, saving, dimmed, subtitleNames, reorder }) {
   const [hov, setHov] = useState(false)
   const [del, setDel] = useState(false)
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState(null)
   const [showMore, setShowMore] = useState(false)
+  const [focusDetailsOnOpen, setFocusDetailsOnOpen] = useState(false)
 
   const inp = { padding:'5px 8px', background:'var(--s2)', border:'1px solid var(--b2)', borderRadius:5,
     color:'var(--t1)', fontSize:9, fontFamily:'DM Sans,sans-serif', outline:'none', width:'100%' }
 
   const hasExtras = Boolean((task.details && String(task.details).trim()) || (task.links && task.links.length) || (task.images && task.images.length))
+  const dragId = reorder?.draggingId
+  const isDraggingThis = Boolean(reorder?.enabled && dragId === task.id)
+  const isDropTarget = Boolean(reorder?.enabled && dragId && dragId !== task.id && reorder.dragOverId === task.id)
+  const isDragActive = Boolean(reorder?.enabled && dragId)
+  const dimOthersWhileDrag = isDragActive && !isDraggingThis && !isDropTarget
 
-  function openEdit(e) {
-    e.stopPropagation()
+  function openEdit(e, opts = {}) {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
+    setFocusDetailsOnOpen(!!opts.focusDetails)
     setEditing(true)
     setForm({
       txt: task.txt,
@@ -181,6 +229,7 @@ function TaskCard({ task, onToggle, onDelete, onEdit, saving, dimmed, subtitleNa
   }
 
   function cancelEdit() {
+    setFocusDetailsOnOpen(false)
     setEditing(false)
     setForm(null)
   }
@@ -249,6 +298,8 @@ function TaskCard({ task, onToggle, onDelete, onEdit, saving, dimmed, subtitleNa
             images={form.images}
             disabled={saving}
             compact
+            autoFocusDetails={focusDetailsOnOpen}
+            onDetailsFocused={() => setFocusDetailsOnOpen(false)}
             onPatch={(p) => setForm((f) => mergeTaskFormPatch(f, p))}
           />
           <div style={{display:'flex',gap:5,marginTop:8}}>
@@ -269,11 +320,117 @@ function TaskCard({ task, onToggle, onDelete, onEdit, saving, dimmed, subtitleNa
   }
 
   return (
-    <div onMouseEnter={()=>setHov(true)} onMouseLeave={()=>{setHov(false);setDel(false)}}
-      style={{...S.card(false,hov), opacity: dimmed ? .35 : task.done ? .45 : 1, marginBottom:3}}>
+    <div
+      onMouseEnter={()=>setHov(true)} onMouseLeave={()=>{setHov(false);setDel(false)}}
+      onDragOver={
+        reorder?.enabled
+          ? (e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              e.dataTransfer.dropEffect = 'move'
+              if (reorder.draggingId && reorder.draggingId !== task.id) {
+                reorder.onDragOverTask?.(task.id)
+              }
+            }
+          : undefined
+      }
+      onDrop={
+        reorder?.enabled
+          ? (e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              reorder.onDropOn(task.id)
+            }
+          : undefined
+      }
+      style={{
+        ...S.card(false, hov || isDropTarget),
+        position: 'relative',
+        opacity: dimmed ? 0.35 : task.done ? 0.45 : isDraggingThis ? 0.5 : dimOthersWhileDrag ? 0.62 : 1,
+        marginBottom: 3,
+        border: isDropTarget ? '1px solid rgba(0,229,195,.55)' : undefined,
+        boxShadow: isDropTarget ? '0 0 0 1px rgba(0,229,195,.12), 0 4px 20px rgba(0,0,0,.25)' : undefined,
+        transition: 'opacity .12s ease, border-color .12s ease, box-shadow .12s ease',
+      }}
+    >
+      {isDropTarget && (
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: 8,
+            right: 8,
+            top: -4,
+            height: 3,
+            borderRadius: 2,
+            background: 'var(--ac)',
+            boxShadow: '0 0 10px rgba(0,229,195,.55)',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
+      )}
+      {reorder?.enabled && (
+        <div
+          draggable
+          aria-label="Drag to reorder this task in the list"
+          aria-grabbed={isDraggingThis}
+          title="Drag onto another row to change order (same subtitle only)"
+          onDragStart={(e) => {
+            e.stopPropagation()
+            reorder.onDragStart(task.id)
+            try {
+              e.dataTransfer.setData('text/plain', task.id)
+              e.dataTransfer.effectAllowed = 'move'
+              const ghost = getEmptyDragImage()
+              if (ghost) e.dataTransfer.setDragImage(ghost, 0, 0)
+            } catch {
+              /* ignore */
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+            padding: '4px 5px 4px 4px',
+            margin: '-2px 0 -2px -2px',
+            borderRadius: 6,
+            cursor: 'grab',
+            color: hov || isDraggingThis ? 'var(--ac)' : 'var(--t3)',
+            background: hov ? 'rgba(0,229,195,.08)' : 'transparent',
+            border: hov ? '1px solid rgba(0,229,195,.2)' : '1px solid transparent',
+            userSelect: 'none',
+            transition: 'background .12s, border-color .12s, color .12s',
+          }}
+        >
+          <DragGripIcon color="currentColor" />
+        </div>
+      )}
       <Checkbox checked={task.done} onChange={v=>onToggle(task.id,v)}/>
       <div style={{flex:1,minWidth:0}}>
-        <div style={{fontSize:9,fontWeight:600,color:task.done?'var(--t3)':'var(--t1)',lineHeight:1.45,textDecoration:task.done?'line-through':'none'}}>
+        <div
+          role="button"
+          tabIndex={0}
+          title="Click to edit — focus details"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              openEdit(e, { focusDetails: true })
+            }
+          }}
+          onClick={(e) => openEdit(e, { focusDetails: true })}
+          style={{
+            fontSize: 9,
+            fontWeight: 600,
+            color: task.done ? 'var(--t3)' : 'var(--t1)',
+            lineHeight: 1.45,
+            textDecoration: task.done ? 'line-through' : 'none',
+            cursor: 'text',
+            borderRadius: 4,
+          }}
+        >
           {task.txt}
         </div>
         <div style={{display:'flex',gap:3,alignItems:'center',marginTop:3,flexWrap:'wrap'}}>
@@ -321,7 +478,7 @@ function TaskCard({ task, onToggle, onDelete, onEdit, saving, dimmed, subtitleNa
       </div>
       {hov && (
         <div style={{display:'flex',gap:3,flexShrink:0}}>
-          <button type="button" title="Edit task" onClick={openEdit}
+          <button type="button" title="Edit task" onClick={(e) => openEdit(e)}
             style={{width:16,height:16,borderRadius:3,border:'1px solid var(--b2)',background:'rgba(0,229,195,.06)',
               color:'var(--ac)',fontSize:9,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>
             ✎
@@ -529,8 +686,23 @@ function SectionSubtitleModal({ area, areaName, names, onClose, onRename, onAdd,
 }
 
 // ─── AREA PANEL ───────────────────────────────────────────────────────────────
-function AreaPanel({ area, tasks, filter, onToggle, onDelete, onEdit, onAdd, highlightIds, savingIds, subtitleNames, onSubtitleRename, onSubtitleAdd, onSubtitleDelete }) {
+function AreaPanel({ area, tasks, filter, onToggle, onDelete, onEdit, onAdd, highlightIds, savingIds, subtitleNames, onSubtitleRename, onSubtitleAdd, onSubtitleDelete, onReorder }) {
   const [subOpen, setSubOpen] = useState(false)
+  const dragTaskIdRef = useRef(null)
+  const [draggingId, setDraggingId] = useState(null)
+  const [dragOverId, setDragOverId] = useState(null)
+
+  useEffect(() => {
+    const clear = () => {
+      dragTaskIdRef.current = null
+      setDraggingId(null)
+      setDragOverId(null)
+      document.body.style.cursor = ''
+    }
+    window.addEventListener('dragend', clear)
+    return () => window.removeEventListener('dragend', clear)
+  }, [])
+
   const all = tasks.filter(t=>t.area===area.key)
   const vis = all.filter(t=>{
     if(filter==='done') return t.done
@@ -568,6 +740,22 @@ function AreaPanel({ area, tasks, filter, onToggle, onDelete, onEdit, onAdd, hig
             background:area.bg,color:area.color,border:`1px solid ${area.border}`,fontFamily:'IBM Plex Mono,monospace'}}>
             {vis.length}
           </span>
+          {filter === 'all' && onReorder && (
+            <span
+              title="Grab the six-dot handle on the left edge of a card, then drop on another row in the same subtitle group."
+              style={{
+                fontSize: 6,
+                color: 'var(--t3)',
+                fontFamily: 'IBM Plex Mono, monospace',
+                letterSpacing: '0.04em',
+                maxWidth: 72,
+                lineHeight: 1.2,
+                textAlign: 'right',
+              }}
+            >
+              drag ⋮⋮ to reorder
+            </span>
+          )}
         </div>
       </div>
       {/* Progress */}
@@ -590,17 +778,74 @@ function AreaPanel({ area, tasks, filter, onToggle, onDelete, onEdit, onAdd, hig
         {secs.length===0 && <div style={{fontSize:9,color:'var(--t3)',padding:'6px 2px'}}>No tasks in this view</div>}
         {secs.map(sec=>(
           <div key={sec.n}>
-            <div style={{fontSize:7,fontWeight:700,letterSpacing:'1.2px',color:'var(--t3)',textTransform:'uppercase',
-              padding:'5px 2px 3px',borderTop:'1px solid var(--b1)',marginTop:2,fontFamily:'IBM Plex Mono,monospace'}}>
-              {sec.n}
+            <div
+              style={{
+                fontSize: 7,
+                fontWeight: 700,
+                letterSpacing: '1.2px',
+                color: 'var(--t3)',
+                textTransform: 'uppercase',
+                padding: '5px 2px 3px',
+                borderTop: '1px solid var(--b1)',
+                marginTop: 2,
+                fontFamily: 'IBM Plex Mono, monospace',
+                display: 'flex',
+                alignItems: 'baseline',
+                flexWrap: 'wrap',
+                gap: 6,
+              }}
+            >
+              <span>{sec.n}</span>
+              {filter === 'all' && onReorder && sec.ts.length > 1 && (
+                <span style={{ fontSize: 6, fontWeight: 500, color: 'var(--t3)', opacity: 0.85, textTransform: 'none', letterSpacing: 0 }}>
+                  same group · reorder with handle
+                </span>
+              )}
             </div>
-            {sec.ts.map(task=>(
-              <TaskCard key={task.id} task={task}
-                onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}
-                saving={savingIds?.has(task.id)}
-                subtitleNames={subtitleNames}
-                dimmed={highlightIds && highlightIds.size>0 && !highlightIds.has(task.id)}/>
-            ))}
+            {sec.ts.map((task) => {
+              const ids = sec.ts.map((t) => t.id)
+              const reorder =
+                filter === 'all' && onReorder
+                  ? {
+                      enabled: true,
+                      draggingId,
+                      dragOverId,
+                      onDragStart: (id) => {
+                        dragTaskIdRef.current = id
+                        setDraggingId(id)
+                        setDragOverId(null)
+                        document.body.style.cursor = 'grabbing'
+                      },
+                      onDragOverTask: (id) => setDragOverId(id),
+                      onDropOn: (targetId) => {
+                        const dragged = dragTaskIdRef.current
+                        dragTaskIdRef.current = null
+                        setDraggingId(null)
+                        setDragOverId(null)
+                        document.body.style.cursor = ''
+                        if (!dragged || dragged === targetId) return
+                        const from = ids.indexOf(dragged)
+                        const to = ids.indexOf(targetId)
+                        if (from < 0 || to < 0) return
+                        const nextIds = moveTaskIdInList(ids, from, to)
+                        onReorder(area.key, sec.n, nextIds)
+                      },
+                    }
+                  : null
+              return (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onToggle={onToggle}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                  saving={savingIds?.has(task.id)}
+                  subtitleNames={subtitleNames}
+                  reorder={reorder}
+                  dimmed={highlightIds && highlightIds.size > 0 && !highlightIds.has(task.id)}
+                />
+              )
+            })}
           </div>
         ))}
         <AddRow area={area.key} onAdd={onAdd} subtitleNames={subtitleNames}/>
@@ -841,6 +1086,17 @@ export default function App() {
     showToast('Subtitle deleted')
   }, [reloadData])
 
+  const handleReorder = useCallback(async (area, sec, ids) => {
+    try {
+      const data = await api.tasksReorder(area, sec, ids)
+      if (Array.isArray(data.tasks)) setTasks(data.tasks)
+      showToast('Order saved')
+    } catch {
+      showToast('Reorder failed', false)
+      reloadData().catch(() => {})
+    }
+  }, [reloadData])
+
   const handleToggle = useCallback(async(id,done)=>{
     setSavingIds(s=>new Set(s).add(id))
     setTasks(prev=>prev.map(t=>t.id===id?{...t,done}:t))
@@ -972,7 +1228,8 @@ export default function App() {
                   subtitleNames={sections[area.key]||[]}
                   onSubtitleRename={handleSubtitleRename}
                   onSubtitleAdd={handleSubtitleAdd}
-                  onSubtitleDelete={handleSubtitleDelete}/>
+                  onSubtitleDelete={handleSubtitleDelete}
+                  onReorder={handleReorder}/>
               ))}
             </div>
             {/* Chat on right */}
@@ -986,7 +1243,8 @@ export default function App() {
               subtitleNames={sections[area.key]||[]}
               onSubtitleRename={handleSubtitleRename}
               onSubtitleAdd={handleSubtitleAdd}
-              onSubtitleDelete={handleSubtitleDelete}/>
+              onSubtitleDelete={handleSubtitleDelete}
+              onReorder={handleReorder}/>
           ))
         )}
       </div>
