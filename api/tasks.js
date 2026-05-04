@@ -40,12 +40,66 @@ export const SEED_TASKS = [
   { id:'o4',  area:'operation', sec:'Reporting',               txt:'Weekly ops report — kWh, repairs log, uptime %, defaults, revenue/target',pri:'normal',tag:'week', owner:'Ops',         done:false, createdAt:new Date().toISOString() },
 ]
 
+function isHttpUrl(s) {
+  try {
+    const u = new URL(s)
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export function normalizeLinks(raw) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  for (const x of raw) {
+    if (typeof x === 'string') {
+      const u = x.trim()
+      if (isHttpUrl(u)) out.push({ url: u, label: '' })
+    } else if (x && typeof x === 'object') {
+      const u = String(x.url || '').trim()
+      if (isHttpUrl(u)) out.push({ url: u, label: String(x.label || '').slice(0, 160) })
+    }
+    if (out.length >= 24) break
+  }
+  return out
+}
+
+export function normalizeImages(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((u) => typeof u === 'string')
+    .map((u) => u.trim())
+    .filter((u) => {
+      if (u.startsWith('https://') || u.startsWith('http://')) return u.length < 2048
+      if (u.startsWith('data:image/')) return u.length < 480000
+      return false
+    })
+    .slice(0, 12)
+}
+
+export function normalizeTask(t) {
+  if (!t || typeof t !== 'object') return t
+  const details = typeof t.details === 'string' ? t.details.slice(0, 20000) : ''
+  return {
+    ...t,
+    details,
+    links: normalizeLinks(t.links),
+    images: normalizeImages(t.images),
+  }
+}
+
 export async function getTasks() {
   try {
     const tasks = await kv.get('casan:tasks:v2')
-    if (!tasks) { await kv.set('casan:tasks:v2', SEED_TASKS); return SEED_TASKS }
-    return tasks
-  } catch { return SEED_TASKS }
+    if (!tasks) {
+      await kv.set('casan:tasks:v2', SEED_TASKS)
+      return SEED_TASKS.map(normalizeTask)
+    }
+    return tasks.map(normalizeTask)
+  } catch {
+    return SEED_TASKS.map(normalizeTask)
+  }
 }
 
 export async function saveTasks(tasks) {
@@ -63,10 +117,27 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const { txt, area, sec, pri, tag, owner } = req.body
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const { txt, area, sec, pri, tag, owner, details, links, images } = body
     if (!txt || !area) return res.status(400).json({ error: 'txt and area required' })
+    if (!['software', 'hardware', 'business', 'operation'].includes(area)) {
+      return res.status(400).json({ error: 'invalid area' })
+    }
     const tasks = await getTasks()
-    const task = { id:`${area[0]}${Date.now()}`, area, sec:sec||'General', txt, pri:pri||'normal', tag:tag||null, owner:owner||'CEO', done:false, createdAt:new Date().toISOString() }
+    const task = normalizeTask({
+      id: `${area[0]}${Date.now()}`,
+      area,
+      sec: sec || 'General',
+      txt: String(txt).trim(),
+      pri: pri === 'urgent' ? 'urgent' : 'normal',
+      tag: tag === 'week' ? 'week' : null,
+      owner: owner ? String(owner).trim() : 'CEO',
+      done: false,
+      createdAt: new Date().toISOString(),
+      details,
+      links,
+      images,
+    })
     tasks.push(task)
     await saveTasks(tasks)
     return res.status(201).json(task)

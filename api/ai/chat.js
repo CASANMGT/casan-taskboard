@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { getTasks, saveTasks } from '../tasks.js'
+import { getTasks, saveTasks, normalizeTask } from '../tasks.js'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -118,13 +118,13 @@ Then follow with your natural language confirmation.`
         if (action.action === 'patch') {
           const idx = currentTasks.findIndex(t => t.id === action.id)
           if (idx >= 0) {
-            currentTasks[idx] = { ...currentTasks[idx], ...action.data, updatedAt: new Date().toISOString() }
+            currentTasks[idx] = normalizeTask({ ...currentTasks[idx], ...action.data, id: currentTasks[idx].id, updatedAt: new Date().toISOString() })
             await saveTasks(currentTasks)
             mutatedTasks = currentTasks
             actionResult = { type: 'patch', id: action.id }
           }
         } else if (action.action === 'add') {
-          const newTask = { id: `${action.data.area[0]}${Date.now()}`, done: false, createdAt: new Date().toISOString(), ...action.data }
+          const newTask = normalizeTask({ id: `${action.data.area[0]}${Date.now()}`, done: false, createdAt: new Date().toISOString(), ...action.data })
           currentTasks.push(newTask)
           await saveTasks(currentTasks)
           mutatedTasks = currentTasks
@@ -138,9 +138,9 @@ Then follow with your natural language confirmation.`
           for (const op of action.ops) {
             if (op.action === 'patch') {
               const idx = currentTasks.findIndex(t => t.id === op.id)
-              if (idx >= 0) currentTasks[idx] = { ...currentTasks[idx], ...op.data, updatedAt: new Date().toISOString() }
+              if (idx >= 0) currentTasks[idx] = normalizeTask({ ...currentTasks[idx], ...op.data, id: currentTasks[idx].id, updatedAt: new Date().toISOString() })
             } else if (op.action === 'add') {
-              currentTasks.push({ id:`${op.data.area[0]}${Date.now()}`, done:false, createdAt:new Date().toISOString(), ...op.data })
+              currentTasks.push(normalizeTask({ id:`${op.data.area[0]}${Date.now()}`, done:false, createdAt:new Date().toISOString(), ...op.data }))
             }
           }
           await saveTasks(currentTasks)
