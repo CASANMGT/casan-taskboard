@@ -1,18 +1,9 @@
-import { kv } from '@vercel/kv'
-
-async function getTasks() {
-  try {
-    return (await kv.get('casan:tasks')) || []
-  } catch {
-    return []
-  }
-}
+import { getTasks, saveTasks } from '../tasks.js'
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
   if (req.method === 'OPTIONS') return res.status(200).end()
 
   const { id } = req.query
@@ -20,17 +11,17 @@ export default async function handler(req, res) {
   if (req.method === 'PATCH') {
     const tasks = await getTasks()
     const idx = tasks.findIndex(t => t.id === id)
-    if (idx === -1) return res.status(404).json({ error: 'Task not found' })
-    tasks[idx] = { ...tasks[idx], ...req.body, id }
-    await kv.set('casan:tasks', tasks)
+    if (idx === -1) return res.status(404).json({ error: 'Not found' })
+    tasks[idx] = { ...tasks[idx], ...req.body, id, updatedAt: new Date().toISOString() }
+    await saveTasks(tasks)
     return res.status(200).json(tasks[idx])
   }
 
   if (req.method === 'DELETE') {
     const tasks = await getTasks()
     const filtered = tasks.filter(t => t.id !== id)
-    if (filtered.length === tasks.length) return res.status(404).json({ error: 'Task not found' })
-    await kv.set('casan:tasks', filtered)
+    if (filtered.length === tasks.length) return res.status(404).json({ error: 'Not found' })
+    await saveTasks(filtered)
     return res.status(200).json({ deleted: id })
   }
 

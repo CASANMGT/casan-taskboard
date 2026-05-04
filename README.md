@@ -1,135 +1,94 @@
-# CASAN CEO Task Board
+# CASAN CEO Task Board v2
 
-Full-stack task board for PT CASAN Energi Indonesia.  
-**Frontend**: React + Vite + Tailwind | **Backend**: Vercel Serverless Functions | **DB**: Vercel KV (Redis)
+Full-stack task board with **AI chat** + **Telegram bot** integration.
+
+## Stack
+- Frontend: React + Vite + Tailwind
+- Backend: Vercel Serverless Functions
+- DB: Vercel KV (Redis)
+- AI: Anthropic Claude (claude-opus-4-5)
+- Bot: Telegram Bot API
 
 ---
 
-## Deploy to Vercel (Step by Step)
+## Deploy to Vercel
 
 ### 1. Push to GitHub
-
 ```bash
-git init
-git add .
-git commit -m "initial: CASAN CEO task board"
+git init && git add . && git commit -m "CASAN task board v2"
 gh repo create casan-taskboard --private --push --source=.
-# or: git remote add origin https://github.com/YOURUSER/casan-taskboard.git && git push -u origin main
 ```
 
-### 2. Create Vercel Project
+### 2. Import on vercel.com/new
+- Framework: **Vite** (auto-detected)
+- Click Deploy
 
-1. Go to [vercel.com/new](https://vercel.com/new)
-2. Import the GitHub repo `casan-taskboard`
-3. Framework preset: **Vite** (auto-detected)
-4. Build command: `npm run build` (default)
-5. Output directory: `dist` (default)
-6. Click **Deploy**
+### 3. Add Vercel KV
+Dashboard → Storage → Create Database → KV → casan-tasks → Create & Connect
 
-### 3. Add Vercel KV (Database)
+### 4. Add Environment Variables
+Dashboard → Settings → Environment Variables:
 
-After first deploy:
+| Variable | Value |
+|---|---|
+| `ANTHROPIC_API_KEY` | Your Anthropic API key |
+| `TELEGRAM_BOT_TOKEN` | From @BotFather on Telegram |
+| `TELEGRAM_CHAT_ID` | Your personal Telegram chat ID |
 
-1. In Vercel dashboard → your project → **Storage** tab
-2. Click **Create Database** → choose **KV**
-3. Name it `casan-tasks`, select the same region as your deployment
-4. Click **Create & Connect** — Vercel auto-injects these env vars:
-   - `KV_URL`
-   - `KV_REST_API_URL`
-   - `KV_REST_API_TOKEN`
-   - `KV_REST_API_READ_ONLY_TOKEN`
+### 5. Redeploy
+Deployments → ⋯ → Redeploy
 
-### 4. Redeploy
-
-After connecting KV, trigger a redeploy:
+### 6. Register Telegram Webhook
+Visit once after deploy:
 ```
-Vercel dashboard → Deployments → ⋯ → Redeploy
+https://your-app.vercel.app/api/telegram/setup
 ```
 
-Your app is now live at `https://casan-taskboard.vercel.app` (or custom domain).
+---
+
+## Telegram Bot Setup
+
+1. Open Telegram → search @BotFather → /newbot
+2. Name: `CASAN Task Bot` | Username: `casantasks_bot`
+3. Copy the token → add as `TELEGRAM_BOT_TOKEN` env var
+4. Get your chat ID: message @userinfobot → copy the ID
+5. Add as `TELEGRAM_CHAT_ID` env var
+6. After deploy, visit `/api/telegram/setup` once
+
+### Telegram Commands
+```
+/tasks       — all open tasks
+/urgent      — urgent only  
+/week        — this week
+/done        — completed tasks
+/sw /hw /biz /ops — by area
+/meeting     — meeting brief
+/done h1     — mark h1 complete
+/open s3     — reopen task
+/urgent b2   — set as urgent
+/add hw Procurement Buy GPS units
+/del h6      — delete task
+/stats       — progress per area
+```
 
 ---
 
 ## Local Development
-
-### Prerequisites
-- Node.js 18+
-- Vercel CLI: `npm i -g vercel`
-
-### Setup
-
 ```bash
 npm install
-vercel link          # link to your Vercel project
-vercel env pull      # pulls KV env vars to .env.local
-vercel dev           # runs frontend + API functions locally on :3000
+npm install -g vercel
+vercel link
+vercel env pull    # pulls all env vars to .env.local
+vercel dev         # runs on localhost:3000
 ```
-
-> `vercel dev` is required (not `npm run dev`) to run serverless functions locally.
-
----
-
-## Project Structure
-
-```
-casan-taskboard/
-├── api/
-│   ├── tasks.js          ← GET all tasks / POST new task
-│   └── tasks/
-│       └── [id].js       ← PATCH (toggle done, update) / DELETE
-├── src/
-│   ├── App.jsx           ← Main React component
-│   ├── main.jsx          ← Entry point
-│   └── index.css         ← CASAN design system + globals
-├── index.html
-├── vite.config.js
-├── tailwind.config.js
-├── vercel.json           ← API routing config
-└── package.json
-```
-
----
 
 ## API Reference
-
-| Method | Endpoint | Body | Description |
-|--------|----------|------|-------------|
-| GET | `/api/tasks` | — | Get all tasks (seeds on first call) |
-| POST | `/api/tasks` | `{txt, area, sec?, pri?, tag?, owner?}` | Create task |
-| PATCH | `/api/tasks/:id` | `{done?, txt?, pri?, tag?, owner?}` | Update any field |
-| DELETE | `/api/tasks/:id` | — | Delete task |
-
-### Area values
-`software` | `hardware` | `business` | `operation`
-
-### Priority values
-`urgent` | `normal`
-
-### Tag values
-`week` | `null`
-
----
-
-## Environment Variables
-
-| Variable | Where | Description |
-|----------|-------|-------------|
-| `KV_REST_API_URL` | Vercel KV (auto) | Redis REST endpoint |
-| `KV_REST_API_TOKEN` | Vercel KV (auto) | Auth token |
-
-> All KV vars are injected automatically when you connect Vercel KV. No manual setup needed.
-
----
-
-## Design System
-
-| Token | Value |
-|-------|-------|
-| Background | `#07090E` |
-| Accent (teal) | `#00E5C3` |
-| Font UI | DM Sans |
-| Font data/IDs | IBM Plex Mono |
-| Software area | `#00E5C3` |
-| Hardware area | `#FB923C` |
-| Business area | `#60A5FA` |
-| Operation area | `#34D399` |
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/tasks` | Get all tasks |
+| POST | `/api/tasks` | Create task |
+| PATCH | `/api/tasks/:id` | Update task |
+| DELETE | `/api/tasks/:id` | Delete task |
+| POST | `/api/ai/chat` | AI chat (Claude) |
+| POST | `/api/telegram/webhook` | Telegram webhook |
+| GET | `/api/telegram/setup` | Register webhook |
